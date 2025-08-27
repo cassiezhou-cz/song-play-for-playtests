@@ -323,11 +323,15 @@ const AIHost = forwardRef<AIHostRef, AIHostProps>(({
       
       {showComment && (
         <div className="host-comment">
-          <div className="comment-bubble">
-            {comment}
+          <div className={`comment-bubble ${comment === '[no response]' ? 'no-response' : ''}`}>
+            {comment === '[no response]' ? (
+              <span className="no-response-text">[no response]</span>
+            ) : (
+              comment
+            )}
           </div>
           
-          {voiceEnabled && audioUrl && (
+          {voiceEnabled && audioUrl && comment !== '[no response]' && (
             <button 
               className={`voice-button ${isPlaying ? 'playing' : ''}`}
               onClick={playVoice}

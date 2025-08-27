@@ -83,6 +83,23 @@
   border-bottom: 8px solid transparent;
 }
 
+/* No response styling */
+.comment-bubble.no-response {
+  background: rgba(200, 200, 200, 0.8);
+  border: 2px solid rgba(150, 150, 150, 0.5);
+  opacity: 0.7;
+}
+
+.comment-bubble.no-response::before {
+  border-left-color: rgba(200, 200, 200, 0.8);
+}
+
+.no-response-text {
+  font-style: italic;
+  color: #666;
+  font-size: 0.85em;
+}
+
 .voice-button {
   background: linear-gradient(135deg, #E146EF, #C146EF);
   border: none;

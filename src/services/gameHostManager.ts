@@ -6,6 +6,7 @@ export interface HostResponse {
   audioUrl?: string
   success: boolean
   error?: string
+  noResponse?: boolean // Indicates when response was skipped due to limiter
 }
 
 interface CharacterInfo {
@@ -19,9 +20,11 @@ export class GameHostManager {
   private initialized = false
   private currentPersonality = 'riley'
   private isReady = false
+  private responseRate = 0.60 // 60% chance to generate response
 
   constructor() {
     this.isReady = aiHostService.getStatus().ready
+    console.log(`🎪 AI Host: Response limiter initialized at ${Math.round(this.responseRate * 100)}%`)
   }
 
   private getCharacterInfo(characterId: string): CharacterInfo {
@@ -56,10 +59,42 @@ export class GameHostManager {
 
   private getRandomResponseLength(): 'short' | 'medium' | 'long' {
     const rand = Math.random()
-    // 60% short, 30% medium, 10% long
+    // 60% short, 40% medium, 0% long
     if (rand < 0.60) return 'short'
-    if (rand < 0.90) return 'medium'
-    return 'long'
+    return 'medium' // Everything else is medium (40%), no long responses
+  }
+
+  private shouldGenerateResponse(): boolean {
+    return Math.random() < this.responseRate
+  }
+
+  setResponseRate(rate: number): void {
+    this.responseRate = Math.max(0, Math.min(1, rate)) // Clamp between 0 and 1
+    console.log(`🎪 AI Host: Response rate set to ${Math.round(this.responseRate * 100)}%`)
+  }
+
+  getResponseRate(): number {
+    return this.responseRate
+  }
+
+  // Debug method to test response limiter
+  testResponseLimiter(iterations: number = 10): void {
+    console.log(`🎪 AI Host: Testing response limiter with ${iterations} iterations at ${Math.round(this.responseRate * 100)}% rate`)
+    let responseCount = 0
+    let noResponseCount = 0
+    
+    for (let i = 0; i < iterations; i++) {
+      if (this.shouldGenerateResponse()) {
+        responseCount++
+        console.log(`  ${i + 1}. ✅ Generate response`)
+      } else {
+        noResponseCount++
+        console.log(`  ${i + 1}. ⏸️ [no response]`)
+      }
+    }
+    
+    const actualRate = (responseCount / iterations * 100).toFixed(1)
+    console.log(`🎪 AI Host: Results - ${responseCount} responses, ${noResponseCount} no responses (${actualRate}% actual rate vs ${Math.round(this.responseRate * 100)}% expected)`)
   }
 
   async initialize(personalityId: string = 'riley'): Promise<boolean> {
@@ -117,6 +152,16 @@ export class GameHostManager {
       return { text: 'Nice job!', success: false, error: 'Host not initialized' }
     }
 
+    // Check response limiter
+    if (!this.shouldGenerateResponse()) {
+      console.log('🎪 AI Host: Skipping response due to rate limiter')
+      return {
+        text: '[no response]',
+        success: true,
+        noResponse: true
+      }
+    }
+
     try {
       const responseLength = options?.responseLength || this.getRandomResponseLength()
       
@@ -167,6 +212,16 @@ export class GameHostManager {
   ): Promise<HostResponse> {
     if (!this.initialized) {
       return { text: 'Nice try!', success: false, error: 'Host not initialized' }
+    }
+
+    // Check response limiter
+    if (!this.shouldGenerateResponse()) {
+      console.log('🎪 AI Host: Skipping response due to rate limiter')
+      return {
+        text: '[no response]',
+        success: true,
+        noResponse: true
+      }
     }
 
     try {
@@ -220,6 +275,16 @@ export class GameHostManager {
       return { text: "Here's your next song!", success: false, error: 'Host not initialized' }
     }
 
+    // Check response limiter
+    if (!this.shouldGenerateResponse()) {
+      console.log('🎪 AI Host: Skipping response due to rate limiter')
+      return {
+        text: '[no response]',
+        success: true,
+        noResponse: true
+      }
+    }
+
     try {
       const responseLength = options?.responseLength || 'short'
       
@@ -267,9 +332,22 @@ export class GameHostManager {
       return { text: 'Thanks for playing!', success: false, error: 'Host not initialized' }
     }
 
+    // Check response limiter
+    if (!this.shouldGenerateResponse()) {
+      console.log('🎪 AI Host: Skipping response due to rate limiter')
+      return {
+        text: '[no response]',
+        success: true,
+        noResponse: true
+      }
+    }
+
     try {
+      // Calculate correct answers (assuming 10 points per correct answer)
+      const correctAnswers = Math.floor(finalScore / 10)
+      
       const request = {
-        scenario: `${playerName} finished the ${playlistName} playlist with a final score of ${finalScore} out of ${totalQuestions}! Celebrate their performance!`,
+        scenario: `${playerName} finished the ${playlistName} playlist! They got ${correctAnswers} questions correct out of ${totalQuestions} total questions, earning ${finalScore} points. Celebrate their performance!`,
         flowStep: {
           id: 'game_result',
           name: 'Game End',
@@ -291,8 +369,9 @@ export class GameHostManager {
 
     } catch (error: any) {
       console.error('AI Host: Failed to generate game end response:', error)
+      const correctAnswers = Math.floor(finalScore / 10)
       return {
-        text: this.getFallbackResponse('game_end'),
+        text: this.getFallbackGameEndResponse(correctAnswers, totalQuestions, finalScore),
         success: false,
         error: error.message
       }
@@ -345,7 +424,8 @@ export class GameHostManager {
       initialized: this.initialized,
       currentPersonality: this.currentPersonality,
       aiServiceReady: hostStatus.aiProviderReady,
-      ttsServiceReady: hostStatus.ttsProviderReady
+      ttsServiceReady: hostStatus.ttsProviderReady,
+      responseRate: this.responseRate
     }
   }
 
@@ -368,6 +448,16 @@ export class GameHostManager {
   ): Promise<HostResponse> {
     if (!this.initialized) {
       return { text: "Welcome to Song Quiz!", success: false, error: 'Host not initialized' }
+    }
+
+    // Note: Game intro typically should always play, but respecting the limiter
+    if (!this.shouldGenerateResponse()) {
+      console.log('🎪 AI Host: Skipping game intro due to rate limiter')
+      return {
+        text: '[no response]',
+        success: true,
+        noResponse: true
+      }
     }
 
     try {
@@ -424,7 +514,25 @@ export class GameHostManager {
 
     return intros[this.currentPersonality as keyof typeof intros] || intros.riley
   }
+
+  private getFallbackGameEndResponse(correctAnswers: number, totalQuestions: number, finalScore: number): string {
+    const character = this.getCharacterInfo(this.currentPersonality)
+    
+    const responses = {
+      riley: `${character.emoji} Amazing game! You got ${correctAnswers} out of ${totalQuestions} questions correct for ${finalScore} points!`,
+      willow: `${character.emoji} What a meaningful journey. ${correctAnswers} correct answers out of ${totalQuestions}, earning you ${finalScore} points.`,
+      alex: `${character.emoji} Good session! ${correctAnswers} out of ${totalQuestions} right, ${finalScore} points total.`,
+      jordan: `${character.emoji} What a wild ride! ${correctAnswers} correct out of ${totalQuestions} questions - that's ${finalScore} points of pure fun!`
+    }
+
+    return responses[this.currentPersonality as keyof typeof responses] || responses.riley
+  }
 }
 
 // Export singleton instance
 export const gameHost = new GameHostManager()
+
+// Make it available globally for debugging
+if (typeof window !== 'undefined') {
+  (window as any).gameHost = gameHost
+}
