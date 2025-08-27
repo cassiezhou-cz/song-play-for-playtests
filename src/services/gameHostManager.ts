@@ -1,4 +1,4 @@
-import { aiService, type AIResponse } from './aiService'
+import { aiHostService } from '../../ai-host/src/services/aiHostService'
 import { ttsService, type TTSResponse } from './ttsService'
 
 export interface HostResponse {
@@ -21,7 +21,7 @@ export class GameHostManager {
   private isReady = false
 
   constructor() {
-    this.isReady = aiService.isReady()
+    this.isReady = aiHostService.getStatus().ready
   }
 
   private getCharacterInfo(characterId: string): CharacterInfo {
@@ -54,6 +54,14 @@ export class GameHostManager {
     return characters[characterId] || characters.riley
   }
 
+  private getRandomResponseLength(): 'short' | 'medium' | 'long' {
+    const rand = Math.random()
+    // 60% short, 30% medium, 10% long
+    if (rand < 0.60) return 'short'
+    if (rand < 0.90) return 'medium'
+    return 'long'
+  }
+
   async initialize(personalityId: string = 'riley'): Promise<boolean> {
     try {
       // Handle the "none" case - user doesn't want AI host
@@ -63,8 +71,26 @@ export class GameHostManager {
         return false
       }
 
+      // Get the voice ID for this personality
+      const character = this.getCharacterInfo(personalityId)
+      
+      // Initialize the ai-host service
+      const initResult = await aiHostService.initialize({
+        gameType: 'songquiz',
+        gameMode: 'single',
+        personalityId,
+        voiceId: character.voiceId,
+        defaultResponseLength: 'medium'
+      })
+
+      if (!initResult.success) {
+        console.error('🎪 AI Host: Initialization failed:', initResult.error)
+        this.initialized = false
+        return false
+      }
+
       this.currentPersonality = personalityId
-      this.isReady = aiService.isReady()
+      this.isReady = aiHostService.getStatus().ready
       this.initialized = true
 
       console.log(`🎪 AI Host: Initialized with ${personalityId} personality`)
@@ -92,40 +118,32 @@ export class GameHostManager {
     }
 
     try {
-      const character = this.getCharacterInfo(this.currentPersonality)
-      const context = {
-        gamePhase: 'correct_answer' as const,
-        playerName,
-        playerScore,
-        opponentScore: 0,
-        songTitle,
-        songArtist,
-        isCorrect: true,
-        responseLength: options?.responseLength || 'medium',
-        character
-      }
-
-      const response = await aiService.generateHostComment(context)
+      const responseLength = options?.responseLength || this.getRandomResponseLength()
       
-      let audioUrl: string | undefined
-
-      if (options?.generateVoice && response.text && ttsService.isReady()) {
-        const ttsResponse = await ttsService.generateSpeech({
-          text: response.text,
-          voiceId: character.voiceId,
-          stability: 0.6,
-          similarityBoost: 0.8
-        })
-
-        if (ttsResponse.success) {
-          audioUrl = ttsResponse.audioUrl
-        }
+      const request = {
+        scenario: `${playerName} correctly guessed "${songTitle}" by ${songArtist} and earned 10 points! Their score is now ${playerScore}.`,
+        flowStep: {
+          id: 'round_result',
+          name: 'Round Result',
+          description: 'Player answered correctly',
+          settings: {
+            isCorrect: true,
+            performance: 4,
+            streakCount: 1
+          }
+        },
+        players: [{ id: 'player1', name: playerName, score: playerScore }],
+        responseLength,
+        generateVoice: options?.generateVoice ?? true
       }
 
+      const response = await aiHostService.generateResponse(request)
+      
       return {
         text: response.text,
-        audioUrl,
-        success: true
+        audioUrl: response.audioUrl,
+        success: response.success,
+        error: response.error
       }
 
     } catch (error: any) {
@@ -152,40 +170,31 @@ export class GameHostManager {
     }
 
     try {
-      const character = this.getCharacterInfo(this.currentPersonality)
-      const context = {
-        gamePhase: 'wrong_answer' as const,
-        playerName,
-        playerScore: 0,
-        opponentScore: 0,
-        songTitle,
-        songArtist,
-        isCorrect: false,
-        responseLength: options?.responseLength || 'medium',
-        character
-      }
-
-      const response = await aiService.generateHostComment(context)
+      const responseLength = options?.responseLength || this.getRandomResponseLength()
       
-      let audioUrl: string | undefined
-
-      if (options?.generateVoice && response.text && ttsService.isReady()) {
-        const ttsResponse = await ttsService.generateSpeech({
-          text: response.text,
-          voiceId: character.voiceId,
-          stability: 0.6,
-          similarityBoost: 0.8
-        })
-
-        if (ttsResponse.success) {
-          audioUrl = ttsResponse.audioUrl
-        }
+      const request = {
+        scenario: `${playerName} guessed incorrectly. The correct answer was "${songTitle}" by ${songArtist}.`,
+        flowStep: {
+          id: 'round_result',
+          name: 'Round Result',
+          description: 'Player answered incorrectly',
+          settings: {
+            isCorrect: false,
+            performance: 2
+          }
+        },
+        players: [{ id: 'player1', name: playerName, score: 0 }],
+        responseLength,
+        generateVoice: options?.generateVoice ?? true
       }
 
+      const response = await aiHostService.generateResponse(request)
+      
       return {
         text: response.text,
-        audioUrl,
-        success: true
+        audioUrl: response.audioUrl,
+        success: response.success,
+        error: response.error
       }
 
     } catch (error: any) {
@@ -212,37 +221,27 @@ export class GameHostManager {
     }
 
     try {
-      const character = this.getCharacterInfo(this.currentPersonality)
-      const context = {
-        gamePhase: 'question_start' as const,
-        playerName: 'Player',
-        playerScore: 0,
-        opponentScore: 0,
-        responseLength: options?.responseLength || 'short',
-        character
-      }
-
-      const response = await aiService.generateHostComment(context)
+      const responseLength = options?.responseLength || 'short'
       
-      let audioUrl: string | undefined
-
-      if (options?.generateVoice && response.text && ttsService.isReady()) {
-        const ttsResponse = await ttsService.generateSpeech({
-          text: response.text,
-          voiceId: character.voiceId,
-          stability: 0.6,
-          similarityBoost: 0.8
-        })
-
-        if (ttsResponse.success) {
-          audioUrl = ttsResponse.audioUrl
-        }
+      const request = {
+        scenario: `Question ${questionNumber} of ${totalQuestions} from the ${playlistName} playlist is starting. Build excitement!`,
+        flowStep: {
+          id: 'question_start',
+          name: 'Question Start',
+          description: 'Starting a new question'
+        },
+        players: [{ id: 'player1', name: 'Player', score: 0 }],
+        responseLength,
+        generateVoice: options?.generateVoice ?? true
       }
 
+      const response = await aiHostService.generateResponse(request)
+      
       return {
         text: response.text,
-        audioUrl,
-        success: true
+        audioUrl: response.audioUrl,
+        success: response.success,
+        error: response.error
       }
 
     } catch (error: any) {
@@ -269,37 +268,25 @@ export class GameHostManager {
     }
 
     try {
-      const character = this.getCharacterInfo(this.currentPersonality)
-      const context = {
-        gamePhase: 'game_end' as const,
-        playerName,
-        playerScore: finalScore,
-        opponentScore: 0,
+      const request = {
+        scenario: `${playerName} finished the ${playlistName} playlist with a final score of ${finalScore} out of ${totalQuestions}! Celebrate their performance!`,
+        flowStep: {
+          id: 'game_result',
+          name: 'Game End',
+          description: 'Game completed, final results'
+        },
+        players: [{ id: 'player1', name: playerName, score: finalScore }],
         responseLength: 'long' as const,
-        character
+        generateVoice: options?.generateVoice ?? true
       }
 
-      const response = await aiService.generateHostComment(context)
+      const response = await aiHostService.generateResponse(request)
       
-      let audioUrl: string | undefined
-
-      if (options?.generateVoice && response.text && ttsService.isReady()) {
-        const ttsResponse = await ttsService.generateSpeech({
-          text: response.text,
-          voiceId: character.voiceId,
-          stability: 0.6,
-          similarityBoost: 0.8
-        })
-
-        if (ttsResponse.success) {
-          audioUrl = ttsResponse.audioUrl
-        }
-      }
-
       return {
         text: response.text,
-        audioUrl,
-        success: true
+        audioUrl: response.audioUrl,
+        success: response.success,
+        error: response.error
       }
 
     } catch (error: any) {
@@ -353,16 +340,17 @@ export class GameHostManager {
   }
 
   getStatus() {
+    const hostStatus = aiHostService.getStatus()
     return {
       initialized: this.initialized,
       currentPersonality: this.currentPersonality,
-      aiServiceReady: aiService.isReady(),
-      ttsServiceReady: ttsService.isReady()
+      aiServiceReady: hostStatus.aiProviderReady,
+      ttsServiceReady: hostStatus.ttsProviderReady
     }
   }
 
   isServiceReady(): boolean {
-    return this.initialized && aiService.isReady()
+    return this.initialized && aiHostService.getStatus().aiProviderReady
   }
 
   // Alias for backwards compatibility
@@ -383,49 +371,35 @@ export class GameHostManager {
     }
 
     try {
-      const character = this.getCharacterInfo(this.currentPersonality)
-      const context = {
-        gamePhase: 'question_start' as const,
-        playerName,
-        playerScore: 0,
-        opponentScore: 0,
-        responseLength: 'medium' as const,
-        character
-      }
-
-      // Generate a personalized game intro
-      const response = await aiService.generateHostComment(context)
+      const responseLength = options?.responseLength || 'medium'
       
-      let audioUrl: string | undefined
-
-      if (options?.generateVoice && response.text && ttsService.isReady()) {
-        console.log('🔊 TTS (Intro): Generating voice for:', response.text.substring(0, 50) + '...')
-        console.log('🔊 TTS (Intro): Using voice ID:', character.voiceId)
-        
-        const ttsResponse = await ttsService.generateSpeech({
-          text: response.text,
-          voiceId: character.voiceId,
-          stability: 0.6,
-          similarityBoost: 0.8
-        })
-
-        console.log('🔊 TTS (Intro): Response:', { success: ttsResponse.success, hasUrl: !!ttsResponse.audioUrl, error: ttsResponse.error })
-
-        if (ttsResponse.success) {
-          audioUrl = ttsResponse.audioUrl
-        }
-      } else {
-        console.log('🔊 TTS (Intro): Skipped because:', {
-          generateVoice: options?.generateVoice,
-          hasText: !!response.text,
-          ttsReady: ttsService.isReady()
-        })
+      const request = {
+        scenario: `Welcome ${playerName} to Song Quiz! They're about to play the ${playlistName} playlist. Get them excited to start!`,
+        flowStep: {
+          id: 'question_start',
+          name: 'Game Intro',
+          description: 'Starting the game with playlist introduction'
+        },
+        players: [{ id: 'player1', name: playerName, score: 0 }],
+        responseLength,
+        generateVoice: options?.generateVoice ?? true
       }
+
+      console.log('🔊 AI Host (Intro): Generating response with ai-host service')
+      const response = await aiHostService.generateResponse(request)
+      
+      console.log('🔊 AI Host (Intro): Response received:', { 
+        success: response.success, 
+        hasText: !!response.text, 
+        hasAudio: !!response.audioUrl, 
+        text: response.text?.substring(0, 50) + '...' 
+      })
 
       return {
         text: response.text || this.getFallbackGameIntro(playlistName),
-        audioUrl,
-        success: true
+        audioUrl: response.audioUrl,
+        success: response.success,
+        error: response.error
       }
 
     } catch (error: any) {
