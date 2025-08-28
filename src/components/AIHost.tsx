@@ -194,6 +194,7 @@ const AIHost = forwardRef<AIHostRef, AIHostProps>(({
               playerScore, 
               songTitle || 'the song', 
               songArtist || 'the artist',
+              '', // playerGuess - empty for now
               { generateVoice: true }
             )
           } else if (gamePhase === 'wrong_answer' && !isCorrect) {
@@ -202,6 +203,8 @@ const AIHost = forwardRef<AIHostRef, AIHostProps>(({
               playerName, 
               songTitle || 'the song', 
               songArtist || 'the artist',
+              '', // playerGuess - empty for now
+              playerScore,
               { generateVoice: true }
             )
           } else if (gamePhase === 'question_start') {
@@ -313,7 +316,7 @@ const AIHost = forwardRef<AIHostRef, AIHostProps>(({
   }
 
   return (
-    <div className={`ai-host ${showComment ? 'active' : ''}`}>
+    <div className={`ai-host ${showComment || isGenerating ? 'active' : ''}`}>
       <div className="host-avatar">
         <div className={`avatar-icon ${isGenerating ? 'thinking' : ''} ${isPlaying ? 'speaking' : ''}`}>
           {characterInfo.emoji}
@@ -354,6 +357,7 @@ const AIHost = forwardRef<AIHostRef, AIHostProps>(({
       {isGenerating && (
         <div className="generating-indicator">
           <div className="thinking-dots">
+            <span>Thinking</span>
             <span>•</span>
             <span>•</span>
             <span>•</span>

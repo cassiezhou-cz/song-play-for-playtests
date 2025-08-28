@@ -16,11 +16,47 @@ interface CharacterInfo {
   voiceId?: string
 }
 
+interface RoundData {
+  roundNumber: number
+  songTitle: string
+  songArtist: string
+  playerGuess: string
+  isCorrect: boolean
+  pointsEarned: number
+  playerScore: number
+  opponentScore: number
+  aiResponse?: string
+  timestamp: number
+}
+
+interface GameContext {
+  gameId: string
+  playlistName: string
+  playerName: string
+  totalQuestions: number
+  currentRound: number
+  
+  // Current game stats
+  correctCount: number
+  incorrectCount: number
+  currentStreak: number
+  longestStreak: number
+  playerScore: number
+  opponentScore: number
+  
+  // Historical data (last 5 rounds)
+  recentRounds: RoundData[]
+  
+  // Previous AI responses to avoid repetition
+  recentAIResponses: string[]
+}
+
 export class GameHostManager {
   private initialized = false
   private currentPersonality = 'riley'
   private isReady = false
-  private responseRate = 0.60 // 60% chance to generate response
+  private responseRate = 0.75 // 75% chance to generate response
+  private gameContext: GameContext | null = null
 
   constructor() {
     this.isReady = aiHostService.getStatus().ready
@@ -97,6 +133,165 @@ export class GameHostManager {
     console.log(`🎪 AI Host: Results - ${responseCount} responses, ${noResponseCount} no responses (${actualRate}% actual rate vs ${Math.round(this.responseRate * 100)}% expected)`)
   }
 
+  // Game context management methods
+  startNewGame(playlistName: string, playerName: string, totalQuestions: number): void {
+    this.gameContext = {
+      gameId: `game_${Date.now()}`,
+      playlistName,
+      playerName,
+      totalQuestions,
+      currentRound: 0,
+      correctCount: 0,
+      incorrectCount: 0,
+      currentStreak: 0,
+      longestStreak: 0,
+      playerScore: 0,
+      opponentScore: 0,
+      recentRounds: [],
+      recentAIResponses: []
+    }
+    console.log(`🎪 AI Host: Started new game context for ${playerName} - ${playlistName}`)
+  }
+
+  addRoundResult(
+    songTitle: string,
+    songArtist: string,
+    playerGuess: string,
+    isCorrect: boolean,
+    pointsEarned: number,
+    playerScore: number,
+    opponentScore: number = 0
+  ): void {
+    if (!this.gameContext) {
+      console.warn('🎪 AI Host: No game context available for round result')
+      return
+    }
+
+    this.gameContext.currentRound++
+    
+    // Update stats
+    if (isCorrect) {
+      this.gameContext.correctCount++
+      this.gameContext.currentStreak++
+      this.gameContext.longestStreak = Math.max(this.gameContext.longestStreak, this.gameContext.currentStreak)
+    } else {
+      this.gameContext.incorrectCount++
+      this.gameContext.currentStreak = 0
+    }
+    
+    this.gameContext.playerScore = playerScore
+    this.gameContext.opponentScore = opponentScore
+
+    // Add round data
+    const roundData: RoundData = {
+      roundNumber: this.gameContext.currentRound,
+      songTitle,
+      songArtist,
+      playerGuess,
+      isCorrect,
+      pointsEarned,
+      playerScore,
+      opponentScore,
+      timestamp: Date.now()
+    }
+
+    this.gameContext.recentRounds.push(roundData)
+    
+    // Keep only last 5 rounds
+    if (this.gameContext.recentRounds.length > 5) {
+      this.gameContext.recentRounds.shift()
+    }
+
+    console.log(`🎪 AI Host: Added round ${this.gameContext.currentRound}: ${isCorrect ? '✅' : '❌'} ${songTitle} by ${songArtist}`)
+  }
+
+  addAIResponse(response: string): void {
+    if (!this.gameContext || !response || response === '[no response]') {
+      return
+    }
+
+    this.gameContext.recentAIResponses.push(response)
+    
+    // Keep only last 5 responses
+    if (this.gameContext.recentAIResponses.length > 5) {
+      this.gameContext.recentAIResponses.shift()
+    }
+  }
+
+  getGameContext(): GameContext | null {
+    return this.gameContext
+  }
+
+  private buildRichScenario(
+    baseScenario: string,
+    songTitle: string,
+    songArtist: string,
+    playerGuess: string,
+    isCorrect: boolean
+  ): string {
+    if (!this.gameContext) {
+      return baseScenario
+    }
+
+    const ctx = this.gameContext
+    const scoreDelta = ctx.playerScore - ctx.opponentScore
+
+    // Build comprehensive context
+    let richScenario = baseScenario + '\n\nADDITIONAL CONTEXT:\n'
+
+    // Game progress
+    richScenario += `- Game Progress: Round ${ctx.currentRound}/${ctx.totalQuestions} of ${ctx.playlistName} playlist\n`
+    richScenario += `- Overall Performance: ${ctx.correctCount} correct, ${ctx.incorrectCount} incorrect this game\n`
+
+    // Scoring context
+    richScenario += `- Current Scores: ${ctx.playerName} ${ctx.playerScore}, Opponent ${ctx.opponentScore}`
+    if (scoreDelta > 0) {
+      richScenario += ` (${ctx.playerName} leading by ${scoreDelta})\n`
+    } else if (scoreDelta < 0) {
+      richScenario += ` (${ctx.playerName} trailing by ${Math.abs(scoreDelta)})\n`
+    } else {
+      richScenario += ` (tied game)\n`
+    }
+
+    // Streak information
+    if (ctx.currentStreak > 1) {
+      richScenario += `- Current Streak: ${ctx.currentStreak} correct in a row!\n`
+    }
+    if (ctx.longestStreak > 2) {
+      richScenario += `- Best Streak: ${ctx.longestStreak} correct answers\n`
+    }
+
+    // Player's actual speech input
+    if (playerGuess && playerGuess.trim() !== '') {
+      richScenario += `- Player's Exact Words: "${playerGuess}"\n`
+    }
+
+    // Recent game history (last 5 rounds)
+    if (ctx.recentRounds.length > 0) {
+      richScenario += '- Recent Rounds:\n'
+      ctx.recentRounds.forEach((round, index) => {
+        const status = round.isCorrect ? '✅' : '❌'
+        richScenario += `  ${round.roundNumber}. ${status} "${round.songTitle}" by ${round.songArtist}`
+        if (round.playerGuess) {
+          richScenario += ` (guessed: "${round.playerGuess}")`
+        }
+        richScenario += '\n'
+      })
+    }
+
+    // Recent AI responses to avoid repetition
+    if (ctx.recentAIResponses.length > 0) {
+      richScenario += '- Recent AI Responses (AVOID REPEATING THESE):\n'
+      ctx.recentAIResponses.forEach((response, index) => {
+        richScenario += `  "${response}"\n`
+      })
+    }
+
+    richScenario += '\nMake your response unique and contextually relevant to this specific game moment!'
+
+    return richScenario
+  }
+
   async initialize(personalityId: string = 'riley'): Promise<boolean> {
     try {
       // Handle the "none" case - user doesn't want AI host
@@ -143,6 +338,7 @@ export class GameHostManager {
     playerScore: number,
     songTitle: string,
     songArtist: string,
+    playerGuess: string = '',
     options?: {
       responseLength?: 'short' | 'medium' | 'long'
       generateVoice?: boolean
@@ -165,8 +361,12 @@ export class GameHostManager {
     try {
       const responseLength = options?.responseLength || this.getRandomResponseLength()
       
+      // Build rich context-aware scenario
+      const baseScenario = `${playerName} correctly guessed "${songTitle}" by ${songArtist} and earned 10 points! Their score is now ${playerScore}.`
+      const richScenario = this.buildRichScenario(baseScenario, songTitle, songArtist, playerGuess, true)
+      
       const request = {
-        scenario: `${playerName} correctly guessed "${songTitle}" by ${songArtist} and earned 10 points! Their score is now ${playerScore}.`,
+        scenario: richScenario,
         flowStep: {
           id: 'round_result',
           name: 'Round Result',
@@ -174,7 +374,7 @@ export class GameHostManager {
           settings: {
             isCorrect: true,
             performance: 4,
-            streakCount: 1
+            streakCount: this.gameContext?.currentStreak || 1
           }
         },
         players: [{ id: 'player1', name: playerName, score: playerScore }],
@@ -184,6 +384,11 @@ export class GameHostManager {
 
       const response = await aiHostService.generateResponse(request)
       
+      // Track the AI response to avoid repetition
+      if (response.success && response.text) {
+        this.addAIResponse(response.text)
+      }
+
       return {
         text: response.text,
         audioUrl: response.audioUrl,
@@ -205,6 +410,8 @@ export class GameHostManager {
     playerName: string,
     songTitle: string,
     songArtist: string,
+    playerGuess: string = '',
+    playerScore: number = 0,
     options?: {
       responseLength?: 'short' | 'medium' | 'long'
       generateVoice?: boolean
@@ -227,8 +434,12 @@ export class GameHostManager {
     try {
       const responseLength = options?.responseLength || this.getRandomResponseLength()
       
+      // Build rich context-aware scenario
+      const baseScenario = `${playerName} guessed incorrectly. The correct answer was "${songTitle}" by ${songArtist}.`
+      const richScenario = this.buildRichScenario(baseScenario, songTitle, songArtist, playerGuess, false)
+      
       const request = {
-        scenario: `${playerName} guessed incorrectly. The correct answer was "${songTitle}" by ${songArtist}.`,
+        scenario: richScenario,
         flowStep: {
           id: 'round_result',
           name: 'Round Result',
@@ -238,13 +449,18 @@ export class GameHostManager {
             performance: 2
           }
         },
-        players: [{ id: 'player1', name: playerName, score: 0 }],
+        players: [{ id: 'player1', name: playerName, score: playerScore }],
         responseLength,
         generateVoice: options?.generateVoice ?? true
       }
 
       const response = await aiHostService.generateResponse(request)
       
+      // Track the AI response to avoid repetition
+      if (response.success && response.text) {
+        this.addAIResponse(response.text)
+      }
+
       return {
         text: response.text,
         audioUrl: response.audioUrl,
@@ -332,15 +548,8 @@ export class GameHostManager {
       return { text: 'Thanks for playing!', success: false, error: 'Host not initialized' }
     }
 
-    // Check response limiter
-    if (!this.shouldGenerateResponse()) {
-      console.log('🎪 AI Host: Skipping response due to rate limiter')
-      return {
-        text: '[no response]',
-        success: true,
-        noResponse: true
-      }
-    }
+    // Game end should ALWAYS play - skip rate limiter
+    console.log('🎪 AI Host: Game end bypassing rate limiter (always play)')
 
     try {
       // Calculate correct answers (assuming 10 points per correct answer)
@@ -441,6 +650,7 @@ export class GameHostManager {
   async announceGameIntro(
     playlistName: string,
     playerName: string = 'Player',
+    totalQuestions: number = 5,
     options?: {
       responseLength?: 'short' | 'medium'
       generateVoice?: boolean
@@ -450,21 +660,17 @@ export class GameHostManager {
       return { text: "Welcome to Song Quiz!", success: false, error: 'Host not initialized' }
     }
 
-    // Note: Game intro typically should always play, but respecting the limiter
-    if (!this.shouldGenerateResponse()) {
-      console.log('🎪 AI Host: Skipping game intro due to rate limiter')
-      return {
-        text: '[no response]',
-        success: true,
-        noResponse: true
-      }
-    }
+    // Initialize new game context
+    this.startNewGame(playlistName, playerName, totalQuestions)
+
+    // Game intro should ALWAYS play - skip rate limiter
+    console.log('🎪 AI Host: Game intro bypassing rate limiter (always play)')
 
     try {
       const responseLength = options?.responseLength || 'medium'
       
       const request = {
-        scenario: `Welcome ${playerName} to Song Quiz! They're about to play the ${playlistName} playlist. Get them excited to start!`,
+        scenario: `Welcome ${playerName} to Song Quiz! They're about to play the ${playlistName} playlist with ${totalQuestions} questions. Get them excited to start!`,
         flowStep: {
           id: 'question_start',
           name: 'Game Intro',
@@ -477,6 +683,11 @@ export class GameHostManager {
 
       console.log('🔊 AI Host (Intro): Generating response with ai-host service')
       const response = await aiHostService.generateResponse(request)
+      
+      // Track the AI response to avoid repetition
+      if (response.success && response.text) {
+        this.addAIResponse(response.text)
+      }
       
       console.log('🔊 AI Host (Intro): Response received:', { 
         success: response.success, 
@@ -526,6 +737,36 @@ export class GameHostManager {
     }
 
     return responses[this.currentPersonality as keyof typeof responses] || responses.riley
+  }
+
+  // Simple wrapper for easy integration with existing components
+  async handleAnswer(
+    playerName: string,
+    songTitle: string,
+    songArtist: string,
+    playerGuess: string,
+    isCorrect: boolean,
+    pointsEarned: number,
+    playerScore: number,
+    opponentScore: number = 0
+  ): Promise<HostResponse> {
+    // Add to context tracking
+    this.addRoundResult(songTitle, songArtist, playerGuess, isCorrect, pointsEarned, playerScore, opponentScore)
+    
+    // Generate appropriate response
+    if (isCorrect) {
+      return this.celebrateCorrectAnswer(playerName, playerScore, songTitle, songArtist, playerGuess)
+    } else {
+      return this.handleIncorrectAnswer(playerName, songTitle, songArtist, playerGuess, playerScore)
+    }
+  }
+
+  // Helper to get context stats for debugging
+  getContextSummary(): string {
+    if (!this.gameContext) return 'No active game context'
+    
+    const ctx = this.gameContext
+    return `Game: ${ctx.playlistName} | Round: ${ctx.currentRound}/${ctx.totalQuestions} | Score: ${ctx.playerScore} | Streak: ${ctx.currentStreak} | Record: ${ctx.correctCount}W-${ctx.incorrectCount}L`
   }
 }
 

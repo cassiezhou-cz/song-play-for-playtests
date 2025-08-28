@@ -73,6 +73,8 @@ const Game = () => {
   const introExecutedRef = useRef<string | null>(null) // Track which playlist intro was executed
 
   // Load player name and selected AI Host character from localStorage
+  const [hostLoadedFromStorage, setHostLoadedFromStorage] = useState(false)
+  
   useEffect(() => {
     // Check for reset parameter in URL
     const urlParams = new URLSearchParams(window.location.search)
@@ -80,6 +82,7 @@ const Game = () => {
       console.log('🎪 HOSTMANAGER: Resetting host selection to default (riley)')
       localStorage.removeItem('selectedAIHost')
       setSelectedHost('riley')
+      setHostLoadedFromStorage(true)
       return
     }
 
@@ -95,6 +98,8 @@ const Game = () => {
     if (savedPlayerName) {
       setPlayerName(savedPlayerName)
     }
+    
+    setHostLoadedFromStorage(true)
   }, [])
 
   // Initialize AI Host service when component mounts with selected personality
@@ -472,11 +477,16 @@ const Game = () => {
   }
 
   useEffect(() => {
-    console.log('🎮 GAME: useEffect [playlist, selectedHost] triggered with:', { playlist, selectedHost })
+    console.log('🎮 GAME: useEffect [playlist, selectedHost, hostLoadedFromStorage] triggered with:', { playlist, selectedHost, hostLoadedFromStorage })
     
-    // Don't start until both playlist and selectedHost are ready
+    // Don't start until playlist, selectedHost, and hostLoadedFromStorage are ready
     if (!playlist) {
       console.log('🎮 GAME: Waiting for playlist to be set')
+      return
+    }
+    
+    if (!hostLoadedFromStorage) {
+      console.log('🎮 GAME: Waiting for host to be loaded from storage')
       return
     }
     
@@ -491,7 +501,7 @@ const Game = () => {
     
     setUsedSongIds([]) // Reset used songs when playlist changes
     startGameWithIntro()
-  }, [playlist, selectedHost])
+  }, [playlist, selectedHost, hostLoadedFromStorage])
 
   const startGameWithIntro = async () => {
     console.log('🎮 GAME: startGameWithIntro called, selectedHost:', selectedHost)
@@ -524,7 +534,7 @@ const Game = () => {
       console.log('🎮 GAME: Requesting AI host game introduction...')
       setWaitingForHostSpeech(true)
       const playlistName = playlist || '2010s'
-      const intro = await gameHost.announceGameIntro(playlistName, playerName, { generateVoice: true })
+      const intro = await gameHost.announceGameIntro(playlistName, playerName, 5, { generateVoice: true })
       console.log('🎮 GAME: Received intro response:', { text: intro.text, hasAudio: !!intro.audioUrl })
       
       if (intro.audioUrl) {
